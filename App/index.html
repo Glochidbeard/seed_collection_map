@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a1208">
+  <title>Speedy Seed Insurance</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="config.js" onerror="window.SUPABASE_URL=null;window.SUPABASE_ANON_KEY=null;"></script>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===== HEADER ===== -->
+  <header id="app-header">
+    <div class="header-left">
+      <span class="app-logo">🌱</span>
+      <h1>Speedy Seed Insurance</h1>
+    </div>
+    <div class="header-right" style="display:flex;align-items:center;gap:8px">
+      <span id="sync-status" class="hidden" style="font-size:10px;letter-spacing:0.5px"></span>
+      <span id="user-badge" class="hidden" style="font-size:11px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--accent-green-light)"></span>
+      <button id="btn-sign-out" class="hidden" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;padding:3px 7px;cursor:pointer">Sign Out</button>
+    </div>
+  </header>
+
+  <!-- ===== MAIN ===== -->
+  <main id="app-main">
+
+    <!-- MAP TAB -->
+    <div id="tab-map" class="tab-content active">
+      <div id="map-container">
+        <div id="map"></div>
+        <div id="map-toolbar">
+          <button id="btn-draw" class="map-tool-btn" title="Draw polygon">✏ Draw</button>
+          <button id="btn-layers" class="map-tool-btn" title="Plant layers">⊞ Layers</button>
+          <button id="btn-basemap" class="map-tool-btn" title="Change basemap">🗺 Map</button>
+          <button id="btn-cache" class="map-tool-btn" title="Save area for offline">⬇ Cache</button>
+        </div>
+      </div>
+
+      <!-- Layers Side Panel -->
+      <div id="layers-panel" class="hidden">
+        <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+          <h3 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--accent-amber-light)">Plant Layers</h3>
+          <button id="btn-layers-close" class="close-btn">✕</button>
+        </div>
+        <div id="layers-list" style="flex:1;overflow-y:auto;padding:6px 0"></div>
+        <div style="padding:10px 14px;border-top:1px solid var(--border)">
+          <button id="btn-add-layer" class="btn btn-secondary" style="width:100%">+ New Layer</button>
+        </div>
+      </div>
+
+      <!-- Polygon Detail Panel -->
+      <div id="detail-panel" class="hidden"></div>
+    </div>
+
+    <!-- SEARCH TAB -->
+    <div id="tab-search" class="tab-content">
+      <div class="search-box" style="padding:12px 14px 0">
+        <input type="text" id="search-input" placeholder="Plant name, botanical name, or layer...">
+        <button id="btn-search" class="btn btn-primary">Search</button>
+      </div>
+      <div class="search-filters" style="padding:8px 14px">
+        <label>
+          <input type="checkbox" id="filter-in-season"> In season only
+        </label>
+        <label>
+          <input type="checkbox" id="filter-skip-visited" checked> Hide skip-listed
+        </label>
+      </div>
+      <div id="search-results" style="flex:1;overflow-y:auto;padding:0 14px 14px"></div>
+    </div>
+
+    <!-- RECORDS TAB -->
+    <div id="tab-records" class="tab-content">
+      <div class="records-header">
+        <input type="text" id="records-filter" placeholder="Filter...">
+        <select id="records-sort">
+          <option value="name">Name</option>
+          <option value="date">Last Visited</option>
+          <option value="yield">Yield</option>
+          <option value="abundance">Abundance</option>
+        </select>
+      </div>
+      <div id="records-list"></div>
+    </div>
+
+  </main>
+
+  <!-- ===== BOTTOM NAV ===== -->
+  <nav id="app-nav">
+    <button class="nav-btn active" data-tab="tab-map">
+      <span class="nav-icon">🗺</span>
+      <span class="nav-label">Map</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-search">
+      <span class="nav-icon">🔍</span>
+      <span class="nav-label">Search</span>
+    </button>
+    <button class="nav-btn" data-tab="tab-records">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">Records</span>
+    </button>
+  </nav>
+
+</div><!-- #app -->
+
+<!-- ===== OFFLINE BADGE ===== -->
+<div id="offline-badge" class="hidden">OFFLINE</div>
+
+<!-- ===== CACHE PROGRESS ===== -->
+<div id="cache-progress" class="hidden"></div>
+
+<!-- ===== MODAL: POLYGON FORM ===== -->
+<div id="modal-polygon" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 id="form-title">New Collection Area</h2>
+      <button class="close-btn" id="btn-cancel-polygon">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- Core Info -->
+      <div class="form-section">
+        <div class="form-section-title">Area Identity</div>
+        <div class="form-row">
+          <div class="form-group full">
+            <label for="field-name">Area Name *</label>
+            <input type="text" id="field-name" placeholder="e.g. North Ridge Chia Patch">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group full">
+            <label for="field-botanical">Botanical Name</label>
+            <input type="text" id="field-botanical" placeholder="e.g. Salvia columbariae">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group full">
+            <label for="field-layer">Plant Layer / Group Tag</label>
+            <input type="text" id="field-layer" placeholder="e.g. Salvia columbariae (groups by species)">
+          </div>
+        </div>
+
+        <div style="margin-top:8px">
+          <label>Polygon Color</label>
+          <div class="color-picker-row" style="margin-top:6px">
+            <div class="color-swatch selected" data-color="#5b8c35" style="background:#5b8c35"></div>
+            <div class="color-swatch" data-color="#c4882a" style="background:#c4882a"></div>
+            <div class="color-swatch" data-color="#3a7abd" style="background:#3a7abd"></div>
+            <div class="color-swatch" data-color="#b54523" style="background:#b54523"></div>
+            <div class="color-swatch" data-color="#8a5eb5" style="background:#8a5eb5"></div>
+            <div class="color-swatch" data-color="#2a9d8f" style="background:#2a9d8f"></div>
+            <div class="color-swatch" data-color="#e9c46a" style="background:#e9c46a"></div>
+            <div class="color-swatch" data-color="#f4a261" style="background:#f4a261"></div>
+            <div class="color-swatch" data-color="#264653" style="background:#264653"></div>
+            <div class="color-swatch" data-color="#a8dadc" style="background:#a8dadc"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visit Data -->
+      <div class="form-section">
+        <div class="form-section-title">Collection Data</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="field-date-visited">Date Visited</label>
+            <input type="date" id="field-date-visited">
+          </div>
+        </div>
+
+        <div class="form-group full" style="margin-bottom:10px">
+          <label for="field-seed-yield">Seed Yield (0–10)</label>
+          <div class="range-row">
+            <input type="range" id="field-seed-yield" min="0" max="10" value="5">
+            <span class="range-val" id="yield-val">5</span>
+          </div>
+        </div>
+
+        <div class="form-group full" style="margin-bottom:10px">
+          <label for="field-abundance">Plant Abundance (0–10)</label>
+          <div class="range-row">
+            <input type="range" id="field-abundance" min="0" max="10" value="5">
+            <span class="range-val" id="abundance-val">5</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group full">
+            <label for="field-tools">Tools Used</label>
+            <input type="text" id="field-tools" placeholder="e.g. seed bags, clippers, gloves">
+          </div>
+        </div>
+      </div>
+
+      <!-- Seasonal Info -->
+      <div class="form-section">
+        <div class="form-section-title">Seasonal Info</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="field-visit-start">Suggested Visit Start</label>
+            <input type="text" id="field-visit-start" placeholder="e.g. Apr 15 or 4/15">
+          </div>
+          <div class="form-group">
+            <label for="field-visit-end">Suggested Visit End</label>
+            <input type="text" id="field-visit-end" placeholder="e.g. May 30 or 5/30">
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">Currently Blooming</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="field-blooming">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">Recent Fire in Area</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="field-fire">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Extra Notes -->
+      <div class="form-section">
+        <div class="form-section-title">Additional Notes</div>
+        <div class="form-group full" style="margin-bottom:10px">
+          <label for="field-unusual">Unusual Characteristics</label>
+          <textarea id="field-unusual" placeholder="Unusual plant features, soil conditions, accessibility..."></textarea>
+        </div>
+        <div class="form-group full" style="margin-bottom:10px">
+          <label for="field-inat">iNaturalist Link</label>
+          <input type="url" id="field-inat" placeholder="https://www.inaturalist.org/observations/...">
+        </div>
+        <div class="form-group full">
+          <label for="field-other">Other</label>
+          <textarea id="field-other" placeholder="Any other notes..."></textarea>
+        </div>
+      </div>
+
+      <!-- Photos -->
+      <div class="form-section">
+        <div class="form-section-title">Photos</div>
+        <div class="photo-upload-area" id="photo-upload-area">
+          📷 Tap to add photos
+        </div>
+        <input type="file" id="photo-input" accept="image/*" multiple style="display:none">
+        <div class="photo-preview-grid" id="photo-preview-grid"></div>
+      </div>
+
+      <!-- Custom Fields -->
+      <div class="form-section">
+        <div class="form-section-title">Custom Fields</div>
+        <div class="custom-fields-list" id="custom-fields-list"></div>
+        <button type="button" id="btn-add-custom-field" class="btn btn-secondary" style="width:100%;margin-top:4px">
+          + Add Custom Field
+        </button>
+      </div>
+
+    </div><!-- modal-body -->
+
+    <div class="modal-footer">
+      <button id="btn-save-polygon" class="btn btn-primary">Save Area</button>
+      <button id="btn-delete-polygon" class="btn btn-danger hidden">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: VISIT PROMPT ===== -->
+<div id="modal-visit" class="modal-overlay hidden">
+  <div class="modal-sheet center-modal" style="max-width:340px">
+    <div class="modal-header">
+      <h2>Area Visited</h2>
+    </div>
+    <div class="visit-prompt-body">
+      <p style="font-size:18px;margin-bottom:6px">✓</p>
+      <p>Would you return to</p>
+      <p><strong id="visit-area-name"></strong></p>
+      <p style="margin-top:4px">again this season?</p>
+    </div>
+    <div class="modal-footer" style="justify-content:center;gap:12px">
+      <button id="btn-visit-yes" class="btn btn-primary">Yes — Return</button>
+      <button id="btn-visit-no" class="btn btn-danger">No — Skip Season</button>
+      <button id="btn-visit-cancel" class="btn btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: BASEMAP SELECTOR ===== -->
+<div id="modal-basemap" class="modal-overlay hidden">
+  <div class="modal-sheet center-modal" style="max-width:380px">
+    <div class="modal-header">
+      <h2>Select Basemap</h2>
+      <button id="close-basemap-modal" class="close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="basemap-options">
+        <button class="basemap-option active" data-basemap="usgs-topo">
+          <span class="basemap-option-icon">🗺</span>
+          <div>
+            <div>USGS Topo</div>
+            <div class="basemap-option-desc">Best detail — parks, trails, elevation</div>
+          </div>
+        </button>
+        <button class="basemap-option" data-basemap="usgs-imagery">
+          <span class="basemap-option-icon">🛰</span>
+          <div>
+            <div>USGS Imagery + Topo</div>
+            <div class="basemap-option-desc">Aerial photo with topo overlay</div>
+          </div>
+        </button>
+        <button class="basemap-option" data-basemap="open-topo">
+          <span class="basemap-option-icon">⛰</span>
+          <div>
+            <div>OpenTopoMap</div>
+            <div class="basemap-option-desc">Topographic contours and terrain</div>
+          </div>
+        </button>
+        <button class="basemap-option" data-basemap="osm">
+          <span class="basemap-option-icon">🌍</span>
+          <div>
+            <div>OpenStreetMap</div>
+            <div class="basemap-option-desc">Community-maintained road map</div>
+          </div>
+        </button>
+        <button class="basemap-option" data-basemap="esri-imagery">
+          <span class="basemap-option-icon">📡</span>
+          <div>
+            <div>Satellite (ESRI)</div>
+            <div class="basemap-option-desc">High-resolution aerial imagery</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: LOGIN ===== -->
+<div id="modal-login" class="modal-overlay hidden">
+  <div class="modal-sheet center-modal" style="max-width:360px">
+    <div class="modal-header">
+      <h2 id="login-title">Sign In</h2>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.6"
+         id="login-subtitle">Sign in to sync your data across devices and with your team.</p>
+      <div id="login-error" class="hidden" style="background:#3a1a12;border:1px solid var(--danger);border-radius:4px;padding:8px 10px;font-size:12px;color:#f08070;margin-bottom:12px"></div>
+      <div class="form-group full" style="margin-bottom:10px">
+        <label for="login-email">Email</label>
+        <input type="text" id="login-email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="form-group full" style="margin-bottom:6px">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;gap:8px">
+      <button id="btn-do-signin" class="btn btn-primary" style="width:100%">Sign In</button>
+      <button id="btn-do-signup" class="btn btn-secondary" style="width:100%">Create Account</button>
+      <button id="btn-skip-login" class="btn btn-ghost" style="width:100%;font-size:11px">Use offline only (no sync)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCRIPTS ===== -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/map.js"></script>
+<script src="js/polygon.js"></script>
+<script src="js/search.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
