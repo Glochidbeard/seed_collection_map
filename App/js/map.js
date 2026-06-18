@@ -114,11 +114,19 @@ class SeedMap {
   enableDrawMode() {
     this.map.addControl(this.drawControl);
     this.isDrawing = true;
-    new L.Draw.Polygon(this.map, this.drawControl.options.draw.polygon).enable();
+    this._activeDrawHandler = new L.Draw.Polygon(this.map, this.drawControl.options.draw.polygon);
+    this._activeDrawHandler.enable();
   }
 
   disableDrawMode() {
-    this.map.removeControl(this.drawControl);
+    // Cancel and clean up any in-progress drawing
+    if (this._activeDrawHandler) {
+      this._activeDrawHandler.disable();
+      this._activeDrawHandler = null;
+    }
+    try { this.map.removeControl(this.drawControl); } catch {}
+    // Clear any orphaned temp layers — saved polygons live in layerGroups, not drawnItems
+    this.drawnItems.clearLayers();
     this.isDrawing = false;
   }
 

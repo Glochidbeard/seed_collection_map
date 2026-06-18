@@ -126,6 +126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ===== MAP EVENTS =====
   seedMap.map.on('click', (e) => {
+    if (seedMap.isDrawing) return; // let draw tool handle all clicks exclusively
     const hits = seedMap.findPolygonsAtPoint(e.latlng, polygonMgr.polygons);
     if (hits.length) {
       polygonMgr.showDetailPanel(hits);
@@ -267,9 +268,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btn-cancel-polygon').addEventListener('click', () => {
-    if (polygonMgr.pendingLeafletLayer && !polygonMgr.editingId) {
-      seedMap.drawnItems.removeLayer(polygonMgr.pendingLeafletLayer);
-    }
+    seedMap.drawnItems.clearLayers(); // remove the just-drawn shape
     polygonMgr.pendingLeafletLayer = null;
     polygonMgr.editingId = null;
     document.getElementById('modal-polygon').classList.add('hidden');
