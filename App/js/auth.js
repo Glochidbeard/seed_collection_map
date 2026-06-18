@@ -61,7 +61,8 @@ class SeedAuth {
   onAuthChange(cb) { this._onAuthChange = cb; }
 
   _updateUI() {
-    const badge = document.getElementById('user-badge');
+    const badge      = document.getElementById('user-badge');
+    const signInBtn  = document.getElementById('btn-sign-in');
     const signOutBtn = document.getElementById('btn-sign-out');
     const syncStatus = document.getElementById('sync-status');
     if (!badge) return;
@@ -70,10 +71,12 @@ class SeedAuth {
       badge.textContent = this.user.email.split('@')[0];
       badge.title = this.user.email;
       badge.classList.remove('hidden');
+      if (signInBtn)  signInBtn.classList.add('hidden');
       if (signOutBtn) signOutBtn.classList.remove('hidden');
       if (syncStatus) syncStatus.classList.remove('hidden');
     } else {
       badge.classList.add('hidden');
+      if (signInBtn)  signInBtn.classList.remove('hidden');
       if (signOutBtn) signOutBtn.classList.add('hidden');
       if (syncStatus) syncStatus.classList.add('hidden');
     }

@@ -352,6 +352,7 @@ class PolygonManager {
         <button class="btn btn-amber" onclick="polygonMgr._markVisited('${p.id}')">✓ Mark Visited</button>
         <button class="btn btn-secondary" onclick="polygonMgr._editPolygon('${p.id}')">✏ Edit</button>
         <button class="btn btn-secondary" onclick="seedMap.panToPolygon('${p.id}')">⊕ Focus</button>
+        <button class="btn btn-danger" onclick="polygonMgr._confirmDelete('${p.id}')">🗑 Delete</button>
       </div>`;
   }
 
@@ -432,6 +433,16 @@ class PolygonManager {
     if (!p || !p.attributes.pictures[index]) return;
     const win = window.open();
     win.document.write(`<img src="${p.attributes.pictures[index]}" style="max-width:100%;max-height:100vh">`);
+  }
+
+  async _confirmDelete(id) {
+    const p = this.polygons.find(x => x.id === id);
+    if (!p) return;
+    if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
+    await this.deletePolygon(id);
+    seedSync.deletePolygon(id);
+    this.hideDetailPanel();
+    seedRecords.render();
   }
 
   async _editPolygon(id) {

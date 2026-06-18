@@ -40,13 +40,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (supabaseReady) {
     const session = await seedAuth.getSession();
 
-    if (!session) {
-      // Not logged in — show login modal (but app is already usable)
-      document.getElementById('modal-login').classList.remove('hidden');
-    } else {
-      // Logged in — kick off background sync
+    if (session) {
+      // Already logged in — sync in background, never blocks startup
       if (navigator.onLine) seedSync.fullSync();
     }
+    // Not logged in — app works fully, user signs in via header button when they want sync
 
     seedAuth.onAuthChange(async (event, user) => {
       if (event === 'SIGNED_IN' && user) {
@@ -64,11 +62,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!navigator.onLine) seedSync._setStatus('offline');
   }
 
-  // Sign out button
+  // Sign in / sign out buttons in header
+  document.getElementById('btn-sign-in').addEventListener('click', () => {
+    document.getElementById('modal-login').classList.remove('hidden');
+  });
+
   document.getElementById('btn-sign-out').addEventListener('click', async () => {
     if (!confirm('Sign out? The app will still work offline with your local data.')) return;
     await seedAuth.signOut();
-    document.getElementById('modal-login').classList.remove('hidden');
   });
 
   // ===== LOGIN MODAL =====
@@ -199,6 +200,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btn-cache').addEventListener('click', async () => {
+    if (!navigator.onLine) {
+      showCacheProgress('You\'re offline — tiles cached while online are still available', 3000);
+      return;
+    }
     showCacheProgress('Calculating tiles...');
     try {
       await seedMap.cacheCurrentArea((msg) => showCacheProgress(msg));
