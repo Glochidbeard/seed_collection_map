@@ -15,8 +15,9 @@ class DesktopApp {
     this.map        = null;
     this.layers     = new Map();  // id -> L.geoJSON layer
     this.speciesTags = [];        // active species filter tags
-    this.gpsWatch   = null;
-    this.gpsMarker  = null;
+    this.gpsWatch      = null;
+    this.gpsMarker     = null;
+    this.gpsAccCircle  = null;
   }
 
   async init() {
@@ -440,30 +441,58 @@ class DesktopApp {
   }
 
   // ── GPS ───────────────────────────────────────────────────
+  _gpsIcon(acquiring = false) {
+    return L.divIcon({
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      html: `<div class="gps-dot-wrap${acquiring ? ' gps-acquiring' : ''}">
+               <div class="gps-heading-cone" id="gps-cone-dsk"></div>
+               <div class="gps-pulse"></div>
+               <div class="gps-inner"></div>
+             </div>`
+    });
+  }
+
   toggleGPS() {
     const btn = document.getElementById('btn-dsk-gps');
+    if (!navigator.geolocation) { alert('GPS not available.'); return; }
+
     if (this.gpsWatch !== null) {
       navigator.geolocation.clearWatch(this.gpsWatch);
       this.gpsWatch = null;
-      if (this.gpsMarker) { this.map.removeLayer(this.gpsMarker); this.gpsMarker = null; }
+      if (this.gpsMarker)    { this.map.removeLayer(this.gpsMarker);    this.gpsMarker = null; }
+      if (this.gpsAccCircle) { this.map.removeLayer(this.gpsAccCircle); this.gpsAccCircle = null; }
       btn.classList.remove('active');
       return;
     }
-    if (!navigator.geolocation) { alert('GPS not available.'); return; }
+
     btn.classList.add('active');
+    this.gpsMarker = L.marker([0, 0], { icon: this._gpsIcon(true), zIndexOffset: 1000 });
+
     this.gpsWatch = navigator.geolocation.watchPosition(pos => {
-      const { latitude: la, longitude: lo } = pos.coords;
-      if (!this.gpsMarker) {
-        this.gpsMarker = L.circleMarker([la, lo], {
-          radius: 8, color: '#fff', weight: 2,
-          fillColor: '#3a7abd', fillOpacity: 1
+      const { latitude: la, longitude: lo, accuracy: acc } = pos.coords;
+      if (!this.gpsMarker._map) {
+        this.gpsMarker.setLatLng([la, lo]);
+        this.gpsMarker.addTo(this.map);
+        this.gpsAccCircle = L.circle([la, lo], {
+          radius: acc, color: '#3a7abd', weight: 1,
+          fillColor: '#3a7abd', fillOpacity: 0.08, interactive: false
         }).addTo(this.map);
-        this.map.setView([la, lo], Math.max(this.map.getZoom(), 13));
+        this.map.setView([la, lo], Math.max(this.map.getZoom(), 14));
+        this.gpsMarker.setIcon(this._gpsIcon(false));
       } else {
         this.gpsMarker.setLatLng([la, lo]);
+        this.gpsMarker.setIcon(this._gpsIcon(false));
+        if (this.gpsAccCircle) this.gpsAccCircle.setLatLng([la, lo]).setRadius(acc);
       }
-    }, () => { btn.classList.remove('active'); this.gpsWatch = null; },
-    { enableHighAccuracy: true });
+    }, err => {
+      if (err.code === err.PERMISSION_DENIED) {
+        btn.classList.remove('active');
+        navigator.geolocation.clearWatch(this.gpsWatch);
+        this.gpsWatch = null;
+      }
+    }, { enableHighAccuracy: true, maximumAge: 2000 });
   }
 
   // ── Sidebar section toggles ───────────────────────────────

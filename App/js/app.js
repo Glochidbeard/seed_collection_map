@@ -43,50 +43,125 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── GPS ───────────────────────────────────────────────────
-  let gpsWatchId    = null;
-  let gpsMarker     = null;
-  let gpsAccCircle  = null;
-  let gpsFollowing  = false;
+  let gpsWatchId   = null;
+  let gpsMarker    = null;
+  let gpsAccCircle = null;
+  let gpsFollowing = false;
+  let headingWatch = null;
+  let gpsHeading   = null;   // degrees from north
+
+  function _gpsIcon(acquiring = false) {
+    return L.divIcon({
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      html: `<div class="gps-dot-wrap${acquiring ? ' gps-acquiring' : ''}">
+               <div class="gps-heading-cone" id="gps-cone"></div>
+               <div class="gps-pulse"></div>
+               <div class="gps-inner"></div>
+             </div>`
+    });
+  }
+
+  function _updateHeadingCone(deg) {
+    const cone = document.getElementById('gps-cone');
+    if (!cone) return;
+    cone.style.display = 'block';
+    cone.style.transform = `translate(-50%, -100%) rotate(${deg}deg)`;
+  }
+
+  function _startHeading() {
+    if (headingWatch) return;
+    const handler = e => {
+      if (e.absolute && e.alpha != null) {
+        gpsHeading = e.alpha;
+        _updateHeadingCone(gpsHeading);
+      }
+    };
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ requires permission
+      DeviceOrientationEvent.requestPermission()
+        .then(p => { if (p === 'granted') window.addEventListener('deviceorientationabsolute', handler, true); })
+        .catch(() => {});
+    } else {
+      window.addEventListener('deviceorientationabsolute', handler, true);
+    }
+    headingWatch = handler;
+  }
+
+  function _stopHeading() {
+    if (headingWatch) {
+      window.removeEventListener('deviceorientationabsolute', headingWatch, true);
+      headingWatch = null;
+    }
+  }
 
   document.getElementById('btn-gps').addEventListener('click', () => {
     if (!navigator.geolocation) { alert('GPS not available on this device.'); return; }
+    const btn = document.getElementById('btn-gps');
+
     if (gpsWatchId !== null) {
-      // Toggle off
+      // If already following, tapping again just re-centres
+      if (gpsMarker && gpsFollowing === false) {
+        gpsFollowing = true;
+        seedMap.map.panTo(gpsMarker.getLatLng());
+        return;
+      }
+      // Second tap while following → turn off
       navigator.geolocation.clearWatch(gpsWatchId);
       gpsWatchId = null;
+      _stopHeading();
       if (gpsMarker)    { seedMap.map.removeLayer(gpsMarker);    gpsMarker = null; }
       if (gpsAccCircle) { seedMap.map.removeLayer(gpsAccCircle); gpsAccCircle = null; }
       gpsFollowing = false;
-      document.getElementById('btn-gps').classList.remove('active');
+      btn.classList.remove('active');
       return;
     }
-    document.getElementById('btn-gps').classList.add('active');
+
+    btn.classList.add('active');
+    showCacheProgress('Acquiring GPS…');
+
+    // Amber "acquiring" dot while waiting for first fix
+    gpsMarker = L.marker([0, 0], { icon: _gpsIcon(true), zIndexOffset: 1000 });
+
     gpsWatchId = navigator.geolocation.watchPosition(pos => {
       const { latitude: la, longitude: lo, accuracy: acc } = pos.coords;
-      if (!gpsMarker) {
-        gpsMarker = L.circleMarker([la, lo], {
-          radius: 8, color: '#fff', weight: 2,
-          fillColor: '#3a7abd', fillOpacity: 1, zIndexOffset: 1000
-        }).addTo(seedMap.map);
+
+      if (!gpsMarker._map) {
+        // First real fix — place marker and zoom in
+        gpsMarker.setLatLng([la, lo]);
+        gpsMarker.addTo(seedMap.map);
         gpsAccCircle = L.circle([la, lo], {
           radius: acc, color: '#3a7abd', weight: 1,
-          fillColor: '#3a7abd', fillOpacity: 0.1
+          fillColor: '#3a7abd', fillOpacity: 0.08, interactive: false
         }).addTo(seedMap.map);
-        seedMap.map.setView([la, lo], Math.max(seedMap.getZoom(), 13));
+        seedMap.map.setView([la, lo], Math.max(seedMap.getZoom(), 15));
         gpsFollowing = true;
+        showCacheProgress(`GPS locked · ±${Math.round(acc)} m`, 2500);
+        // Switch from amber to blue now that we have a fix
+        gpsMarker.setIcon(_gpsIcon(false));
+        _startHeading();
       } else {
         gpsMarker.setLatLng([la, lo]);
+        gpsMarker.setIcon(_gpsIcon(false));
         gpsAccCircle.setLatLng([la, lo]).setRadius(acc);
         if (gpsFollowing) seedMap.map.panTo([la, lo]);
+        if (gpsHeading !== null) _updateHeadingCone(gpsHeading);
       }
     }, err => {
       console.warn('GPS error:', err);
-      document.getElementById('btn-gps').classList.remove('active');
-      gpsWatchId = null;
-    }, { enableHighAccuracy: true, timeout: 10000 });
+      // Don't kill the watch on a transient error — keep trying
+      if (err.code === err.PERMISSION_DENIED) {
+        btn.classList.remove('active');
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+        showCacheProgress('GPS permission denied', 3000);
+      }
+    }, { enableHighAccuracy: true, maximumAge: 2000 });
   });
 
-  // Tap GPS dot to toggle follow mode
+  // Dragging stops auto-follow; tapping GPS button re-enables it
   seedMap.map.on('dragstart', () => { gpsFollowing = false; });
 
   // ── Offline badge ─────────────────────────────────────────
