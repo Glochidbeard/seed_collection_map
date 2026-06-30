@@ -4,21 +4,21 @@ const MAX_TILES = 8000;
 
 const APP_ASSETS = [
   './index.html',
+  './desktop.html',
   './css/style.css',
+  './css/desktop.css',
   './js/db.js',
-  './js/auth.js',
-  './js/sync.js',
   './js/map.js',
   './js/polygon.js',
   './js/search.js',
   './js/app.js',
+  './js/desktop.js',
   './manifest.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js'
 ];
 
 self.addEventListener('install', e => {

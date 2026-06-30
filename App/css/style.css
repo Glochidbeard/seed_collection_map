@@ -873,6 +873,59 @@ input[type="range"] {
 }
 .leaflet-popup-tip { background: var(--bg-panel) !important; }
 
+/* ===== SPECIES TAGS ===== */
+.species-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #1a2d10;
+  border: 1px solid var(--accent-green);
+  border-radius: 10px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--accent-green-light);
+}
+
+/* ===== PROJECT CHIPS (form) ===== */
+.project-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.project-chip.on { color: var(--text-primary); }
+
+/* ===== PROJECT BADGES (records tab) ===== */
+.project-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.project-badge:hover { border-color: var(--border-light); }
+.remove-project-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+}
+.remove-project-btn:hover { color: var(--danger-light); }
+
 /* ===== UTILITY ===== */
 .hidden { display: none !important; }
 .text-center { text-align: center; }

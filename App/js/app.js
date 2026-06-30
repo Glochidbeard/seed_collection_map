@@ -2,152 +2,101 @@
 
 document.addEventListener('DOMContentLoaded', async () => {
 
-  // ===== SERVICE WORKER =====
+  // ── Service worker ────────────────────────────────────────
   if ('serviceWorker' in navigator) {
     try {
       await navigator.serviceWorker.register('./sw.js');
-      navigator.serviceWorker.addEventListener('message', (e) => {
-        if (e.data.type === 'CACHE_DONE') {
+      navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data.type === 'CACHE_DONE')
           showCacheProgress(`Cached ${e.data.cached} of ${e.data.total} tiles`, 2000);
-        }
       });
-    } catch (err) {
-      console.warn('SW registration failed:', err);
-    }
+    } catch (err) { console.warn('SW failed:', err); }
   }
 
-  // ===== DB + MAP INIT =====
+  // ── DB + map init ─────────────────────────────────────────
   await seedDB.init();
 
-  const savedLat  = parseFloat(await seedDB.getSetting('lastLat'))  || 37.5;
-  const savedLng  = parseFloat(await seedDB.getSetting('lastLng'))  || -119.5;
-  const savedZoom = parseInt(await seedDB.getSetting('lastZoom'))   || 8;
-  seedMap.init(savedLat, savedLng, savedZoom);
+  const lat  = parseFloat(await seedDB.getSetting('lastLat'))  || 37.5;
+  const lng  = parseFloat(await seedDB.getSetting('lastLng'))  || -119.5;
+  const zoom = parseInt(await seedDB.getSetting('lastZoom'))   || 8;
+  seedMap.init(lat, lng, zoom);
 
   seedMap.map.on('moveend', () => {
     const c = seedMap.getCenter();
-    seedDB.setSetting('lastLat', c.lat);
-    seedDB.setSetting('lastLng', c.lng);
+    seedDB.setSetting('lastLat',  c.lat);
+    seedDB.setSetting('lastLng',  c.lng);
     seedDB.setSetting('lastZoom', seedMap.getZoom());
   });
 
-  // Load local polygons immediately (works offline)
   await polygonMgr.loadAll();
 
-  // ===== AUTH + SYNC =====
-  const supabaseReady = seedAuth.init();
-
-  if (supabaseReady) {
-    const session = await seedAuth.getSession();
-
-    if (session) {
-      // Already logged in — sync in background, never blocks startup
-      if (navigator.onLine) seedSync.fullSync();
-    }
-    // Not logged in — app works fully, user signs in via header button when they want sync
-
-    seedAuth.onAuthChange(async (event, user) => {
-      if (event === 'SIGNED_IN' && user) {
-        document.getElementById('modal-login').classList.add('hidden');
-        await seedSync.fullSync();
-      }
-    });
-
-    // Flush pending changes whenever connection returns
-    window.addEventListener('online', () => {
-      seedSync._setStatus('syncing');
-      seedSync.fullSync();
-    });
-    window.addEventListener('offline', () => seedSync._setStatus('offline'));
-    if (!navigator.onLine) seedSync._setStatus('offline');
-  }
-
-  // Sign in / sign out buttons in header
-  document.getElementById('btn-sign-in').addEventListener('click', () => {
-    document.getElementById('modal-login').classList.remove('hidden');
-  });
-
-  document.getElementById('btn-sign-out').addEventListener('click', async () => {
-    if (!confirm('Sign out? The app will still work offline with your local data.')) return;
-    await seedAuth.signOut();
-  });
-
-  // ===== LOGIN MODAL =====
-  const loginError = document.getElementById('login-error');
-  const showLoginError = (msg) => {
-    loginError.textContent = msg;
-    loginError.classList.remove('hidden');
-  };
-
-  document.getElementById('btn-do-signin').addEventListener('click', async () => {
-    loginError.classList.add('hidden');
-    const email    = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value;
-    if (!email || !password) { showLoginError('Please enter email and password.'); return; }
-    try {
-      document.getElementById('btn-do-signin').textContent = 'Signing in...';
-      await seedAuth.signIn(email, password);
-    } catch (e) {
-      showLoginError(e.message || 'Sign in failed.');
-    } finally {
-      document.getElementById('btn-do-signin').textContent = 'Sign In';
-    }
-  });
-
-  document.getElementById('btn-do-signup').addEventListener('click', async () => {
-    loginError.classList.add('hidden');
-    const email    = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value;
-    if (!email || !password) { showLoginError('Please enter email and password.'); return; }
-    if (password.length < 6) { showLoginError('Password must be at least 6 characters.'); return; }
-    try {
-      document.getElementById('btn-do-signup').textContent = 'Creating...';
-      await seedAuth.signUp(email, password);
-      showLoginError(''); // clear
-      loginError.style.color = 'var(--accent-green-light)';
-      loginError.classList.remove('hidden');
-      loginError.textContent = 'Account created! Check your email to confirm, then sign in.';
-    } catch (e) {
-      loginError.style.color = '';
-      showLoginError(e.message || 'Sign up failed.');
-    } finally {
-      document.getElementById('btn-do-signup').textContent = 'Create Account';
-    }
-  });
-
-  document.getElementById('btn-skip-login').addEventListener('click', () => {
-    document.getElementById('modal-login').classList.add('hidden');
-  });
-
-  // Enter key on password field triggers sign in
-  document.getElementById('login-password').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('btn-do-signin').click();
-  });
-
-  // ===== MAP EVENTS =====
-  seedMap.map.on('click', (e) => {
-    if (seedMap.isDrawing) return; // let draw tool handle all clicks exclusively
+  // ── Map interactions ──────────────────────────────────────
+  seedMap.map.on('click', e => {
+    if (seedMap.isDrawing) return;
     const hits = seedMap.findPolygonsAtPoint(e.latlng, polygonMgr.polygons);
-    if (hits.length) {
-      polygonMgr.showDetailPanel(hits);
-    } else {
-      polygonMgr.hideDetailPanel();
-    }
+    hits.length ? polygonMgr.showDetailPanel(hits) : polygonMgr.hideDetailPanel();
   });
 
-  seedMap.onPolygonDrawn((layer) => {
+  seedMap.onPolygonDrawn(layer => {
     polygonMgr.openForm(layer, null);
     document.getElementById('btn-draw').classList.remove('active');
   });
 
-  // ===== OFFLINE BADGE =====
-  const offlineBadge = document.getElementById('offline-badge');
-  const updateOnline = () => offlineBadge.classList.toggle('hidden', navigator.onLine);
-  window.addEventListener('online', updateOnline);
+  // ── GPS ───────────────────────────────────────────────────
+  let gpsWatchId    = null;
+  let gpsMarker     = null;
+  let gpsAccCircle  = null;
+  let gpsFollowing  = false;
+
+  document.getElementById('btn-gps').addEventListener('click', () => {
+    if (!navigator.geolocation) { alert('GPS not available on this device.'); return; }
+    if (gpsWatchId !== null) {
+      // Toggle off
+      navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = null;
+      if (gpsMarker)    { seedMap.map.removeLayer(gpsMarker);    gpsMarker = null; }
+      if (gpsAccCircle) { seedMap.map.removeLayer(gpsAccCircle); gpsAccCircle = null; }
+      gpsFollowing = false;
+      document.getElementById('btn-gps').classList.remove('active');
+      return;
+    }
+    document.getElementById('btn-gps').classList.add('active');
+    gpsWatchId = navigator.geolocation.watchPosition(pos => {
+      const { latitude: la, longitude: lo, accuracy: acc } = pos.coords;
+      if (!gpsMarker) {
+        gpsMarker = L.circleMarker([la, lo], {
+          radius: 8, color: '#fff', weight: 2,
+          fillColor: '#3a7abd', fillOpacity: 1, zIndexOffset: 1000
+        }).addTo(seedMap.map);
+        gpsAccCircle = L.circle([la, lo], {
+          radius: acc, color: '#3a7abd', weight: 1,
+          fillColor: '#3a7abd', fillOpacity: 0.1
+        }).addTo(seedMap.map);
+        seedMap.map.setView([la, lo], Math.max(seedMap.getZoom(), 13));
+        gpsFollowing = true;
+      } else {
+        gpsMarker.setLatLng([la, lo]);
+        gpsAccCircle.setLatLng([la, lo]).setRadius(acc);
+        if (gpsFollowing) seedMap.map.panTo([la, lo]);
+      }
+    }, err => {
+      console.warn('GPS error:', err);
+      document.getElementById('btn-gps').classList.remove('active');
+      gpsWatchId = null;
+    }, { enableHighAccuracy: true, timeout: 10000 });
+  });
+
+  // Tap GPS dot to toggle follow mode
+  seedMap.map.on('dragstart', () => { gpsFollowing = false; });
+
+  // ── Offline badge ─────────────────────────────────────────
+  const badge      = document.getElementById('offline-badge');
+  const updateOnline = () => badge.classList.toggle('hidden', navigator.onLine);
+  window.addEventListener('online',  updateOnline);
   window.addEventListener('offline', updateOnline);
   updateOnline();
 
-  // ===== TAB NAVIGATION =====
+  // ── Tab navigation ────────────────────────────────────────
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.dataset.tab;
@@ -155,71 +104,60 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(tabId).classList.add('active');
-      if (tabId === 'tab-map') setTimeout(() => seedMap.map.invalidateSize(), 50);
+      if (tabId === 'tab-map')     setTimeout(() => seedMap.map.invalidateSize(), 50);
       if (tabId === 'tab-records') seedRecords.render();
+      if (tabId === 'tab-search')  seedSearch.clearHighlights();
     });
   });
 
-  // ===== MAP TOOLBAR =====
+  // ── Map toolbar ───────────────────────────────────────────
   document.getElementById('btn-draw').addEventListener('click', () => {
     const btn = document.getElementById('btn-draw');
     if (btn.classList.contains('active')) {
-      seedMap.disableDrawMode();
-      btn.classList.remove('active');
+      seedMap.disableDrawMode(); btn.classList.remove('active');
     } else {
-      seedMap.enableDrawMode();
-      btn.classList.add('active');
+      seedMap.enableDrawMode(); btn.classList.add('active');
     }
   });
 
   document.getElementById('btn-layers').addEventListener('click', () => {
-    const panel = document.getElementById('layers-panel');
-    panel.classList.remove('hidden');
-    panel.classList.add('open');
+    document.getElementById('layers-panel').classList.remove('hidden');
+    document.getElementById('layers-panel').classList.add('open');
   });
-
   document.getElementById('btn-layers-close').addEventListener('click', () => {
     document.getElementById('layers-panel').classList.remove('open');
   });
 
   document.getElementById('btn-basemap').addEventListener('click', () => {
     document.getElementById('modal-basemap').classList.remove('hidden');
-    document.querySelectorAll('.basemap-option').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.basemap === seedMap.currentBasemap);
-    });
+    document.querySelectorAll('.basemap-option').forEach(b =>
+      b.classList.toggle('active', b.dataset.basemap === seedMap.currentBasemap));
   });
-
   document.querySelectorAll('.basemap-option').forEach(btn => {
     btn.addEventListener('click', () => {
       seedMap.switchBasemap(btn.dataset.basemap);
       document.getElementById('modal-basemap').classList.add('hidden');
     });
   });
-
   document.getElementById('close-basemap-modal').addEventListener('click', () => {
     document.getElementById('modal-basemap').classList.add('hidden');
   });
 
   document.getElementById('btn-cache').addEventListener('click', async () => {
     if (!navigator.onLine) {
-      showCacheProgress('You\'re offline — tiles cached while online are still available', 3000);
+      showCacheProgress("You're offline — tiles cached while online are still available", 3000);
       return;
     }
     showCacheProgress('Calculating tiles...');
-    try {
-      await seedMap.cacheCurrentArea((msg) => showCacheProgress(msg));
-    } catch {
-      showCacheProgress('Cache failed — check connection', 3000);
-    }
+    try { await seedMap.cacheCurrentArea(msg => showCacheProgress(msg)); }
+    catch { showCacheProgress('Cache failed — check connection', 3000); }
   });
 
-  // ===== POLYGON FORM =====
-  document.getElementById('field-seed-yield').addEventListener('input', (e) => {
-    document.getElementById('yield-val').textContent = e.target.value;
-  });
-  document.getElementById('field-abundance').addEventListener('input', (e) => {
-    document.getElementById('abundance-val').textContent = e.target.value;
-  });
+  // ── Polygon form ──────────────────────────────────────────
+  document.getElementById('field-seed-yield').addEventListener('input', e =>
+    document.getElementById('yield-val').textContent = e.target.value);
+  document.getElementById('field-abundance').addEventListener('input', e =>
+    document.getElementById('abundance-val').textContent = e.target.value);
 
   document.querySelectorAll('.color-swatch').forEach(sw => {
     sw.addEventListener('click', () => {
@@ -228,59 +166,50 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  document.getElementById('field-layer').addEventListener('blur', (e) => {
-    const layerName = e.target.value.trim();
-    if (layerName) {
-      const color = polygonMgr.getColorForLayer(layerName);
-      const swatch = document.querySelector(`.color-swatch[data-color="${color}"]`);
-      if (swatch) {
-        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
-        swatch.classList.add('selected');
-      }
+  document.getElementById('field-layer').addEventListener('blur', e => {
+    const name = e.target.value.trim();
+    if (!name) return;
+    const color  = polygonMgr.getColorForLayer(name);
+    const swatch = document.querySelector(`.color-swatch[data-color="${color}"]`);
+    if (swatch) {
+      document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+      swatch.classList.add('selected');
     }
   });
 
-  document.getElementById('photo-upload-area').addEventListener('click', () => {
-    document.getElementById('photo-input').click();
-  });
+  document.getElementById('photo-upload-area').addEventListener('click', () =>
+    document.getElementById('photo-input').click());
 
-  document.getElementById('photo-input').addEventListener('change', async (e) => {
-    for (const file of Array.from(e.target.files)) {
+  document.getElementById('photo-input').addEventListener('change', async e => {
+    for (const file of Array.from(e.target.files))
       polygonMgr.formPhotos.push(await fileToBase64(file));
-    }
     polygonMgr._renderPhotoPreview();
     e.target.value = '';
   });
 
-  document.getElementById('btn-add-custom-field').addEventListener('click', () => {
-    polygonMgr._addCustomFieldRow();
-  });
+  document.getElementById('btn-add-custom-field').addEventListener('click', () =>
+    polygonMgr._addCustomFieldRow());
 
-  // Save polygon — local first, then sync
   document.getElementById('btn-save-polygon').addEventListener('click', async () => {
-    const layer  = polygonMgr.pendingLeafletLayer;
-    const saved  = await polygonMgr.saveFromForm(layer);
+    const saved = await polygonMgr.saveFromForm(polygonMgr.pendingLeafletLayer);
     if (saved) {
       document.getElementById('modal-polygon').classList.add('hidden');
       seedRecords.render();
-      seedSync.upsertPolygon(saved); // async, non-blocking
     }
   });
 
   document.getElementById('btn-cancel-polygon').addEventListener('click', () => {
-    seedMap.drawnItems.clearLayers(); // remove the just-drawn shape
+    seedMap.drawnItems.clearLayers();
     polygonMgr.pendingLeafletLayer = null;
     polygonMgr.editingId = null;
     document.getElementById('modal-polygon').classList.add('hidden');
   });
 
-  // Delete polygon — local first, then sync soft-delete
   document.getElementById('btn-delete-polygon').addEventListener('click', async () => {
     if (!polygonMgr.editingId) return;
-    if (!confirm('Delete this collection area? This cannot be undone.')) return;
+    if (!confirm('Delete this area? Cannot be undone.')) return;
     const id = polygonMgr.editingId;
     await polygonMgr.deletePolygon(id);
-    seedSync.deletePolygon(id); // async, non-blocking
     polygonMgr.editingId = null;
     polygonMgr.pendingLeafletLayer = null;
     document.getElementById('modal-polygon').classList.add('hidden');
@@ -290,50 +219,38 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('btn-add-layer').addEventListener('click', () => {
     const name = prompt('New plant layer name:');
-    if (name && name.trim()) {
+    if (name?.trim()) {
       polygonMgr._assignLayerColor(name.trim());
       polygonMgr._refreshLayersPanel();
     }
   });
 
-  // ===== VISIT PROMPT =====
-  document.getElementById('btn-visit-yes').addEventListener('click', async () => {
-    await polygonMgr.resolveVisit(true);
-    const p = polygonMgr.polygons.find(x => x.id === polygonMgr.visitPromptId);
-    if (p) seedSync.upsertPolygon(p);
-  });
-  document.getElementById('btn-visit-no').addEventListener('click', async () => {
-    await polygonMgr.resolveVisit(false);
-    const p = polygonMgr.polygons.find(x => x.id === polygonMgr.visitPromptId);
-    if (p) seedSync.upsertPolygon(p);
-  });
-  document.getElementById('btn-visit-cancel').addEventListener('click', () => {
-    document.getElementById('modal-visit').classList.add('hidden');
-  });
+  // ── Visit prompt ──────────────────────────────────────────
+  document.getElementById('btn-visit-yes').addEventListener('click', () => polygonMgr.resolveVisit(true));
+  document.getElementById('btn-visit-no').addEventListener('click',  () => polygonMgr.resolveVisit(false));
+  document.getElementById('btn-visit-cancel').addEventListener('click', () =>
+    document.getElementById('modal-visit').classList.add('hidden'));
 
-  // ===== SEARCH =====
-  document.getElementById('btn-search').addEventListener('click', () => seedSearch.runSearch());
-  document.getElementById('search-input').addEventListener('keydown', (e) => {
+  // ── Search ────────────────────────────────────────────────
+  document.getElementById('btn-search').addEventListener('click',    () => seedSearch.runSearch());
+  document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') seedSearch.runSearch();
   });
-  document.getElementById('filter-in-season').addEventListener('change', () => seedSearch.runSearch());
+  document.getElementById('filter-in-season').addEventListener('change',  () => seedSearch.runSearch());
   document.getElementById('filter-skip-visited').addEventListener('change', () => seedSearch.runSearch());
 
-  // ===== RECORDS =====
-  document.getElementById('records-filter').addEventListener('input', () => seedRecords.render());
-  document.getElementById('records-sort').addEventListener('change', () => seedRecords.render());
+  // ── Records ───────────────────────────────────────────────
+  document.getElementById('records-filter').addEventListener('input',  () => seedRecords.render());
+  document.getElementById('records-sort').addEventListener('change',   () => seedRecords.render());
 
-  // ===== CLOSE MODALS ON OVERLAY CLICK =====
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay && !overlay.id.includes('login')) {
-        overlay.classList.add('hidden');
-      }
-    });
-  });
+  // ── Close modals on overlay tap ───────────────────────────
+  document.querySelectorAll('.modal-overlay').forEach(overlay =>
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) overlay.classList.add('hidden');
+    }));
 });
 
-// ===== HELPERS =====
+// ── Helpers ───────────────────────────────────────────────────
 function showCacheProgress(msg, autoHide = 0) {
   const el = document.getElementById('cache-progress');
   el.textContent = msg;
@@ -343,9 +260,9 @@ function showCacheProgress(msg, autoHide = 0) {
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    const r = new FileReader();
+    r.onload  = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
   });
 }

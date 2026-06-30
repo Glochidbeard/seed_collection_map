@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seed Cache — Desktop</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/desktop.css">
+</head>
+<body>
+
+<div id="desktop-app">
+
+  <!-- HEADER -->
+  <header id="desktop-header">
+    <span class="dsk-logo">🌱</span>
+    <h1>Seed Cache</h1>
+    <span class="dsk-header-tag">Office View</span>
+    <span class="dsk-match-count" id="dsk-match-count">Loading…</span>
+    <button class="dsk-map-btn" id="btn-export">⬇ Export CSV</button>
+    <a href="index.html" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;padding:4px 9px;text-decoration:none;white-space:nowrap">📱 Field View</a>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside id="desktop-sidebar">
+
+    <!-- Species filter -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        Species Filter
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="sidebar-section-body">
+        <label class="dsk-label">Search species (Enter or comma to add)</label>
+        <div class="filter-tag-input" id="species-tag-box">
+          <input id="species-tag-input" placeholder="e.g. Salvia columbariae…" autocomplete="off">
+        </div>
+      </div>
+    </div>
+
+    <!-- Season / date filter -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        Season &amp; Dates
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="sidebar-section-body">
+        <label class="dsk-label" for="f-season-date">Show areas in season on…</label>
+        <input type="date" class="dsk-input" id="f-season-date" style="margin-bottom:10px">
+        <div class="dsk-toggle-row">
+          <label for="f-hide-skip" style="font-size:12px;color:var(--text-secondary)">Hide skip-listed</label>
+          <input type="checkbox" class="dsk-check" id="f-hide-skip" checked>
+        </div>
+      </div>
+    </div>
+
+    <!-- Yield & Abundance -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        Yield &amp; Abundance
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="sidebar-section-body">
+        <label class="dsk-label">Seed Yield min</label>
+        <div class="dsk-range-row" style="margin-bottom:10px">
+          <input type="range" id="f-yield-min" min="0" max="10" value="0"
+                 oninput="document.getElementById('yield-min-val').textContent=this.value">
+          <span class="dsk-range-val" id="yield-min-val">0</span>
+        </div>
+        <label class="dsk-label">Seed Yield max</label>
+        <div class="dsk-range-row" style="margin-bottom:10px">
+          <input type="range" id="f-yield-max" min="0" max="10" value="10"
+                 oninput="document.getElementById('yield-max-val').textContent=this.value">
+          <span class="dsk-range-val" id="yield-max-val">10</span>
+        </div>
+        <label class="dsk-label">Abundance min</label>
+        <div class="dsk-range-row" style="margin-bottom:10px">
+          <input type="range" id="f-abund-min" min="0" max="10" value="0"
+                 oninput="document.getElementById('abund-min-val').textContent=this.value">
+          <span class="dsk-range-val" id="abund-min-val">0</span>
+        </div>
+        <label class="dsk-label">Abundance max</label>
+        <div class="dsk-range-row">
+          <input type="range" id="f-abund-max" min="0" max="10" value="10"
+                 oninput="document.getElementById('abund-max-val').textContent=this.value">
+          <span class="dsk-range-val" id="abund-max-val">10</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status toggles -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        Status
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="sidebar-section-body">
+        <label class="dsk-label" for="f-blooming">Blooming</label>
+        <select class="dsk-input" id="f-blooming" style="margin-bottom:10px">
+          <option value="any">Any</option>
+          <option value="yes">Yes — currently blooming</option>
+          <option value="no">No</option>
+        </select>
+        <label class="dsk-label" for="f-fire">Recent Fire</label>
+        <select class="dsk-input" id="f-fire">
+          <option value="any">Any</option>
+          <option value="yes">Yes — fire history</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Projects -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        Projects
+        <span class="section-toggle">▾</span>
+      </div>
+      <div class="sidebar-section-body">
+        <div class="dsk-toggle-row" style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text-muted)">Match any project</label>
+          <input type="checkbox" class="dsk-check" id="f-proj-any" checked>
+        </div>
+        <div id="proj-filter-list"></div>
+      </div>
+    </div>
+
+    <!-- Reset -->
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <button id="btn-reset-filters" class="dsk-map-btn" style="width:100%;text-align:center">↺ Reset Filters</button>
+    </div>
+
+    <!-- Results list -->
+    <div id="sidebar-results"></div>
+
+  </aside>
+
+  <!-- MAP AREA -->
+  <div id="desktop-map-wrap">
+    <div id="desktop-map"></div>
+
+    <!-- Map toolbar -->
+    <div id="desktop-map-controls">
+      <!-- Basemap switcher group -->
+      <div style="display:flex;flex-direction:column;gap:3px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:6px;box-shadow:2px 2px 8px rgba(0,0,0,0.5)">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);text-align:center;margin-bottom:2px">Basemap</div>
+        <button class="dsk-basemap-btn dsk-map-btn active" data-basemap="esri-imagery" style="padding:4px 8px;font-size:11px">🛰 Satellite</button>
+        <button class="dsk-basemap-btn dsk-map-btn" data-basemap="usgs-topo" style="padding:4px 8px;font-size:11px">🗺 USGS Topo</button>
+        <button class="dsk-basemap-btn dsk-map-btn" data-basemap="usgs-imagery" style="padding:4px 8px;font-size:11px">⛰ USGS Img+Topo</button>
+        <button class="dsk-basemap-btn dsk-map-btn" data-basemap="open-topo" style="padding:4px 8px;font-size:11px">🏔 OpenTopo</button>
+        <button class="dsk-basemap-btn dsk-map-btn" data-basemap="osm" style="padding:4px 8px;font-size:11px">🌍 OSM</button>
+      </div>
+      <button class="dsk-map-btn" id="btn-dsk-gps" style="margin-top:4px">📍 GPS</button>
+    </div>
+
+    <!-- Polygon detail (bottom strip) -->
+    <div id="desktop-detail"></div>
+  </div>
+
+</div><!-- #desktop-app -->
+
+<!-- EXPORT MODAL -->
+<div id="modal-export" class="dsk-modal-overlay hidden">
+  <div class="dsk-modal">
+    <div class="dsk-modal-header">
+      <h2>Export to CSV</h2>
+      <button class="close-btn" onclick="document.getElementById('modal-export').classList.add('hidden')">✕</button>
+    </div>
+    <div class="dsk-modal-body">
+      <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+        Exports <strong id="export-count"></strong> areas currently shown. Select columns to include:
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button id="btn-cols-all"  class="dsk-map-btn" style="font-size:11px;padding:4px 10px">All</button>
+        <button id="btn-cols-none" class="dsk-map-btn" style="font-size:11px;padding:4px 10px">None</button>
+      </div>
+      <div class="col-grid">
+        <label class="col-option selected"><input type="checkbox" value="name" checked> Area Name</label>
+        <label class="col-option selected"><input type="checkbox" value="species" checked> Species</label>
+        <label class="col-option selected"><input type="checkbox" value="projects" checked> Projects</label>
+        <label class="col-option selected"><input type="checkbox" value="date_visited" checked> Date Visited</label>
+        <label class="col-option selected"><input type="checkbox" value="seed_yield" checked> Seed Yield</label>
+        <label class="col-option selected"><input type="checkbox" value="abundance" checked> Abundance</label>
+        <label class="col-option"><input type="checkbox" value="layer"> Layer</label>
+        <label class="col-option"><input type="checkbox" value="tools"> Tools Used</label>
+        <label class="col-option"><input type="checkbox" value="visit_start"> Visit Window Start</label>
+        <label class="col-option"><input type="checkbox" value="visit_end"> Visit Window End</label>
+        <label class="col-option"><input type="checkbox" value="blooming"> Blooming</label>
+        <label class="col-option"><input type="checkbox" value="fire"> Recent Fire</label>
+        <label class="col-option"><input type="checkbox" value="unusual"> Unusual Chars.</label>
+        <label class="col-option"><input type="checkbox" value="inat"> iNaturalist Link</label>
+        <label class="col-option"><input type="checkbox" value="other"> Other Notes</label>
+        <label class="col-option"><input type="checkbox" value="centroid_lat"> Latitude</label>
+        <label class="col-option"><input type="checkbox" value="centroid_lon"> Longitude</label>
+      </div>
+    </div>
+    <div class="dsk-modal-footer">
+      <button id="btn-cancel-export" class="dsk-map-btn">Cancel</button>
+      <button id="btn-do-export" class="dsk-map-btn" style="background:var(--accent-green);border-color:var(--accent-green-light);color:#fff">⬇ Download CSV</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script src="js/db.js"></script>
+<script src="js/desktop.js"></script>
+
+</body>
+</html>

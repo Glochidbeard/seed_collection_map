@@ -1,4 +1,4 @@
-// Polygon CRUD, form rendering, and detail panel
+// Polygon CRUD, form rendering, detail panel
 
 const LAYER_COLORS = [
   '#5b8c35','#c4882a','#3a7abd','#b54523','#8a5eb5',
@@ -7,17 +7,21 @@ const LAYER_COLORS = [
 
 class PolygonManager {
   constructor() {
-    this.polygons = []; // all loaded polygon data
-    this.editingId = null;
+    this.polygons    = [];
+    this.projects    = [];
+    this.editingId   = null;
     this.pendingLeafletLayer = null;
-    this.formPhotos = []; // base64 photos for current form session
+    this.formPhotos  = [];
     this.visitPromptId = null;
-    this._layerColors = new Map(); // plantLayer name -> color
-    this._colorIndex = 0;
+    this._layerColors  = new Map();
+    this._colorIndex   = 0;
   }
 
   async loadAll() {
-    this.polygons = await seedDB.getAllPolygons();
+    [this.polygons, this.projects] = await Promise.all([
+      seedDB.getAllPolygons(),
+      seedDB.getAllProjects()
+    ]);
     this.polygons.forEach(p => {
       if (p.plantLayer && !this._layerColors.has(p.plantLayer)) {
         this._assignLayerColor(p.plantLayer, p.color);
@@ -27,97 +31,129 @@ class PolygonManager {
     this._refreshLayersPanel();
   }
 
-  getColorForLayer(layerName) {
-    if (!layerName) return LAYER_COLORS[0];
-    if (!this._layerColors.has(layerName)) {
-      this._assignLayerColor(layerName);
-    }
-    return this._layerColors.get(layerName);
+  getColorForLayer(name) {
+    if (!name) return LAYER_COLORS[0];
+    if (!this._layerColors.has(name)) this._assignLayerColor(name);
+    return this._layerColors.get(name);
   }
 
-  _assignLayerColor(name, preferredColor) {
-    const color = preferredColor || LAYER_COLORS[this._colorIndex % LAYER_COLORS.length];
+  _assignLayerColor(name, preferred) {
+    const color = preferred || LAYER_COLORS[this._colorIndex % LAYER_COLORS.length];
     this._layerColors.set(name, color);
     this._colorIndex++;
   }
 
-  // ===== FORM =====
+  // ── Species helpers ───────────────────────────────────────
+  getSpecies(p) {
+    // Support both new array format and legacy string
+    const a = p.attributes;
+    if (Array.isArray(a.species)) return a.species.filter(Boolean);
+    if (a.botanicalName) return [a.botanicalName];
+    return [];
+  }
+
+  // ── Form ──────────────────────────────────────────────────
   openForm(leafletLayer, existingId = null) {
     this.pendingLeafletLayer = leafletLayer;
-    this.editingId = existingId;
+    this.editingId  = existingId;
     this.formPhotos = [];
 
     const existing = existingId ? this.polygons.find(p => p.id === existingId) : null;
-    if (existing && existing.attributes.pictures) {
-      this.formPhotos = [...existing.attributes.pictures];
-    }
+    if (existing?.attributes?.pictures) this.formPhotos = [...existing.attributes.pictures];
 
-    const overlay = document.getElementById('modal-polygon');
-    overlay.classList.remove('hidden');
-
+    document.getElementById('modal-polygon').classList.remove('hidden');
     document.getElementById('form-title').textContent = existing ? 'Edit Collection Area' : 'New Collection Area';
     document.getElementById('btn-delete-polygon').classList.toggle('hidden', !existing);
 
     this._populateForm(existing);
     this._renderPhotoPreview();
+    this._renderProjectChips();
   }
 
   _populateForm(data) {
-    const a = data ? data.attributes : {};
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-    const setChecked = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+    const a    = data ? data.attributes : {};
+    const setV = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    const setC = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
 
-    setVal('field-name', data ? data.name : '');
-    setVal('field-layer', data ? (data.plantLayer || '') : '');
-    setVal('field-botanical', a.botanicalName);
-    setVal('field-date-visited', a.dateVisited);
-    setVal('field-seed-yield', a.seedYield != null ? a.seedYield : 5);
-    setVal('field-abundance', a.relativeAbundance != null ? a.relativeAbundance : 5);
-    setVal('field-tools', a.toolsUsed);
-    setVal('field-visit-start', a.suggestedVisitStart);
-    setVal('field-visit-end', a.suggestedVisitEnd);
-    setChecked('field-blooming', a.blooming);
-    setChecked('field-fire', a.recentFire);
-    setVal('field-unusual', a.unusualCharacteristics);
-    setVal('field-inat', a.iNaturalistLink);
-    setVal('field-other', a.other);
+    setV('field-name',        data?.name ?? '');
+    setV('field-layer',       data?.plantLayer ?? '');
+    setV('field-species',     (Array.isArray(a.species) ? a.species : a.botanicalName ? [a.botanicalName] : []).join(', '));
+    setV('field-date-visited', a.dateVisited);
+    setV('field-seed-yield',   a.seedYield != null ? a.seedYield : 5);
+    setV('field-abundance',    a.relativeAbundance != null ? a.relativeAbundance : 5);
+    setV('field-tools',        a.toolsUsed);
+    setV('field-visit-start',  a.suggestedVisitStart);
+    setV('field-visit-end',    a.suggestedVisitEnd);
+    setC('field-blooming',     a.blooming);
+    setC('field-fire',         a.recentFire);
+    setV('field-unusual',      a.unusualCharacteristics);
+    setV('field-inat',         a.iNaturalistLink);
+    setV('field-other',        a.other);
 
-    this._updateRangeDisplay('field-seed-yield', 'yield-val');
-    this._updateRangeDisplay('field-abundance', 'abundance-val');
+    document.getElementById('yield-val').textContent     = a.seedYield ?? 5;
+    document.getElementById('abundance-val').textContent = a.relativeAbundance ?? 5;
+
+    // Project checkboxes
+    const selected = data?.projectIds ?? [];
+    document.getElementById('form-project-list').dataset.selected = JSON.stringify(selected);
 
     // Custom fields
-    const customList = document.getElementById('custom-fields-list');
-    customList.innerHTML = '';
+    document.getElementById('custom-fields-list').innerHTML = '';
     if (a.customFields) {
       Object.entries(a.customFields).forEach(([k, v]) => this._addCustomFieldRow(k, v));
     }
 
     // Color swatches
-    const selectedColor = data ? data.color : LAYER_COLORS[0];
+    const color = data?.color ?? LAYER_COLORS[0];
     document.querySelectorAll('.color-swatch').forEach(sw => {
-      sw.classList.toggle('selected', sw.dataset.color === selectedColor);
+      sw.classList.toggle('selected', sw.dataset.color === color);
     });
   }
 
-  _updateRangeDisplay(inputId, displayId) {
-    const input = document.getElementById(inputId);
-    const display = document.getElementById(displayId);
-    if (input && display) display.textContent = input.value;
+  _renderProjectChips() {
+    const container = document.getElementById('form-project-list');
+    if (!container) return;
+    const selected  = JSON.parse(container.dataset.selected || '[]');
+
+    if (!this.projects.length) {
+      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">No projects yet — create one in the Records tab.</span>';
+      return;
+    }
+
+    container.innerHTML = this.projects.map(proj => {
+      const on = selected.includes(proj.id);
+      return `<label class="project-chip ${on ? 'on' : ''}" data-id="${proj.id}"
+        style="border-color:${proj.color};${on ? `background:${proj.color}20` : ''}">
+        <input type="checkbox" value="${proj.id}" ${on ? 'checked' : ''} style="display:none">
+        <span style="width:8px;height:8px;border-radius:50%;background:${proj.color};display:inline-block;margin-right:4px"></span>
+        ${escHtml(proj.name)}
+      </label>`;
+    }).join('');
+
+    container.querySelectorAll('.project-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        chip.classList.toggle('on');
+        const cb = chip.querySelector('input');
+        cb.checked = !cb.checked;
+        const projColor = this.projects.find(p => p.id === chip.dataset.id)?.color ?? '#888';
+        chip.style.background = cb.checked ? projColor + '20' : '';
+      });
+    });
   }
 
   _renderPhotoPreview() {
     const grid = document.getElementById('photo-preview-grid');
+    if (!grid) return;
     grid.innerHTML = '';
     this.formPhotos.forEach((b64, i) => {
       const wrap = document.createElement('div');
       wrap.className = 'preview-img-wrap';
-      wrap.innerHTML = `<img src="${b64}" alt="photo ${i+1}">
-        <button class="preview-remove" data-index="${i}">✕</button>`;
+      wrap.innerHTML = `<img src="${b64}" alt="photo"><button class="preview-remove" data-i="${i}">✕</button>`;
       grid.appendChild(wrap);
     });
     grid.querySelectorAll('.preview-remove').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.formPhotos.splice(parseInt(btn.dataset.index), 1);
+        this.formPhotos.splice(parseInt(btn.dataset.i), 1);
         this._renderPhotoPreview();
       });
     });
@@ -125,23 +161,33 @@ class PolygonManager {
 
   _addCustomFieldRow(key = '', val = '') {
     const list = document.getElementById('custom-fields-list');
-    const row = document.createElement('div');
+    const row  = document.createElement('div');
     row.className = 'custom-field-row';
     row.innerHTML = `
-      <input type="text" class="custom-key" placeholder="Field name" value="${key}">
-      <input type="text" class="custom-val" placeholder="Value" value="${val}">
+      <input type="text" class="custom-key" placeholder="Field name" value="${escHtml(key)}">
+      <input type="text" class="custom-val" placeholder="Value"      value="${escHtml(val)}">
       <button class="btn btn-ghost remove-custom-field">✕</button>`;
     row.querySelector('.remove-custom-field').addEventListener('click', () => row.remove());
     list.appendChild(row);
   }
 
   collectFormData() {
-    const getVal = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
-    const getChecked = id => { const el = document.getElementById(id); return el ? el.checked : false; };
-    const getNum = id => { const el = document.getElementById(id); return el ? parseInt(el.value) : 0; };
+    const gV  = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const gC  = id => { const el = document.getElementById(id); return el ? el.checked : false; };
+    const gN  = id => { const el = document.getElementById(id); return el ? parseInt(el.value) : 0; };
 
-    const selectedSwatch = document.querySelector('.color-swatch.selected');
-    const color = selectedSwatch ? selectedSwatch.dataset.color : LAYER_COLORS[0];
+    const swatch = document.querySelector('.color-swatch.selected');
+    const color  = swatch ? swatch.dataset.color : LAYER_COLORS[0];
+
+    // Parse species — split by comma, trim, dedupe empties
+    const speciesRaw = gV('field-species');
+    const species = speciesRaw
+      ? [...new Set(speciesRaw.split(',').map(s => s.trim()).filter(Boolean))]
+      : [];
+
+    // Project ids from checked chips
+    const projectIds = [...document.querySelectorAll('#form-project-list input:checked')]
+      .map(cb => cb.value);
 
     const customFields = {};
     document.querySelectorAll('.custom-field-row').forEach(row => {
@@ -151,25 +197,26 @@ class PolygonManager {
     });
 
     return {
-      name: getVal('field-name') || 'Unnamed Area',
-      plantLayer: getVal('field-layer') || '',
+      name:       gV('field-name') || 'Unnamed Area',
+      plantLayer: gV('field-layer') || '',
       color,
+      projectIds,
       attributes: {
-        botanicalName: getVal('field-botanical'),
-        dateVisited: getVal('field-date-visited'),
-        seedYield: getNum('field-seed-yield'),
-        relativeAbundance: getNum('field-abundance'),
-        toolsUsed: getVal('field-tools'),
-        suggestedVisitStart: getVal('field-visit-start'),
-        suggestedVisitEnd: getVal('field-visit-end'),
-        blooming: getChecked('field-blooming'),
-        recentFire: getChecked('field-fire'),
-        unusualCharacteristics: getVal('field-unusual'),
-        iNaturalistLink: getVal('field-inat'),
-        other: getVal('field-other'),
-        pictures: [...this.formPhotos],
-        visitHistory: [],
-        skipUntilYear: null,
+        species,
+        dateVisited:            gV('field-date-visited'),
+        seedYield:              gN('field-seed-yield'),
+        relativeAbundance:      gN('field-abundance'),
+        toolsUsed:              gV('field-tools'),
+        suggestedVisitStart:    gV('field-visit-start'),
+        suggestedVisitEnd:      gV('field-visit-end'),
+        blooming:               gC('field-blooming'),
+        recentFire:             gC('field-fire'),
+        unusualCharacteristics: gV('field-unusual'),
+        iNaturalistLink:        gV('field-inat'),
+        other:                  gV('field-other'),
+        pictures:               [...this.formPhotos],
+        visitHistory:           [],
+        skipUntilYear:          null,
         customFields
       }
     };
@@ -177,33 +224,18 @@ class PolygonManager {
 
   async saveFromForm(leafletLayer) {
     const formData = this.collectFormData();
-
-    let existing = null;
-    if (this.editingId) {
-      existing = this.polygons.find(p => p.id === this.editingId);
-    }
-
-    const geojson = leafletLayer
-      ? leafletLayer.toGeoJSON()
-      : (existing ? existing.geojson : null);
-
+    const existing = this.editingId ? this.polygons.find(p => p.id === this.editingId) : null;
+    const geojson  = leafletLayer ? leafletLayer.toGeoJSON() : existing?.geojson;
     if (!geojson) return null;
 
-    // Merge visit history from existing
     if (existing) {
-      formData.attributes.visitHistory = existing.attributes.visitHistory || [];
-      formData.attributes.skipUntilYear = existing.attributes.skipUntilYear;
+      formData.attributes.visitHistory  = existing.attributes.visitHistory  || [];
+      formData.attributes.skipUntilYear = existing.attributes.skipUntilYear ?? null;
     }
 
-    const polygon = {
-      id: this.editingId || undefined,
-      ...formData,
-      geojson
-    };
+    const polygon = { id: this.editingId || undefined, ...formData, geojson };
+    const saved   = await seedDB.savePolygon(polygon);
 
-    const saved = await seedDB.savePolygon(polygon);
-
-    // Update local cache
     const idx = this.polygons.findIndex(p => p.id === saved.id);
     if (idx >= 0) {
       this.polygons[idx] = saved;
@@ -214,11 +246,7 @@ class PolygonManager {
       seedMap.addPolygon(saved);
     }
 
-    // Update layer color map
-    if (saved.plantLayer) {
-      this._assignLayerColor(saved.plantLayer, saved.color);
-    }
-
+    if (saved.plantLayer) this._assignLayerColor(saved.plantLayer, saved.color);
     this._refreshLayersPanel();
     this.editingId = null;
     this.pendingLeafletLayer = null;
@@ -232,18 +260,13 @@ class PolygonManager {
     this._refreshLayersPanel();
   }
 
-  // ===== DETAIL PANEL =====
+  // ── Detail panel ──────────────────────────────────────────
   showDetailPanel(polygonsAtPoint) {
     if (!polygonsAtPoint.length) return;
-
     const panel = document.getElementById('detail-panel');
     panel.classList.remove('hidden');
-
-    if (polygonsAtPoint.length === 1) {
-      this._renderSingleDetail(polygonsAtPoint[0]);
-    } else {
-      this._renderMultiDetail(polygonsAtPoint);
-    }
+    if (polygonsAtPoint.length === 1) this._renderSingleDetail(polygonsAtPoint[0]);
+    else this._renderMultiDetail(polygonsAtPoint);
   }
 
   hideDetailPanel() {
@@ -251,23 +274,31 @@ class PolygonManager {
   }
 
   _renderSingleDetail(p) {
-    const panel = document.getElementById('detail-panel');
-    const a = p.attributes;
-    const inSeason = this._isInSeason(a.suggestedVisitStart, a.suggestedVisitEnd);
+    const panel   = document.getElementById('detail-panel');
+    const a       = p.attributes;
+    const species = this.getSpecies(p);
+    const inSzn   = this._isInSeason(a.suggestedVisitStart, a.suggestedVisitEnd);
+    const projNames = (p.projectIds || [])
+      .map(id => this.projects.find(pr => pr.id === id))
+      .filter(Boolean)
+      .map(pr => `<span class="badge badge-season" style="border-color:${pr.color}">${escHtml(pr.name)}</span>`)
+      .join(' ');
 
     panel.innerHTML = `
       <div class="detail-header">
         <div>
-          <div style="font-size:15px;font-weight:bold;color:var(--text-primary)">${escHtml(p.name)}</div>
+          <div style="font-size:15px;font-weight:bold">${escHtml(p.name)}</div>
           ${p.plantLayer ? `<div style="font-size:11px;color:var(--text-muted)">Layer: ${escHtml(p.plantLayer)}</div>` : ''}
         </div>
         <button class="close-btn" onclick="polygonMgr.hideDetailPanel()">✕</button>
       </div>
 
-      ${p.attributes.botanicalName ? `
-        <div style="padding:6px 16px;font-style:italic;color:var(--text-secondary);font-size:12px;">
-          ${escHtml(a.botanicalName)}
+      ${species.length ? `
+        <div style="padding:6px 16px 2px;display:flex;flex-wrap:wrap;gap:4px">
+          ${species.map(s => `<span class="species-tag">${escHtml(s)}</span>`).join('')}
         </div>` : ''}
+
+      ${projNames ? `<div style="padding:4px 16px 6px;display:flex;flex-wrap:wrap;gap:4px">${projNames}</div>` : ''}
 
       <div class="detail-body">
         <div class="attr-row">
@@ -280,7 +311,6 @@ class PolygonManager {
             <div class="attr-value">${this._ratingPips(a.relativeAbundance)}</div>
           </div>
         </div>
-
         <div class="attr-row">
           <div class="attr-item">
             <div class="attr-label">Last Visited</div>
@@ -288,151 +318,115 @@ class PolygonManager {
           </div>
           <div class="attr-item">
             <div class="attr-label">Season</div>
-            <div class="attr-value">${this._seasonBadge(a.suggestedVisitStart, a.suggestedVisitEnd, inSeason)}</div>
+            <div class="attr-value">${this._seasonBadge(a.suggestedVisitStart, a.suggestedVisitEnd, inSzn)}</div>
           </div>
         </div>
-
-        ${a.toolsUsed ? `
-          <div class="attr-item mb-8">
-            <div class="attr-label">Tools Used</div>
-            <div class="attr-value">${escHtml(a.toolsUsed)}</div>
-          </div>` : ''}
-
+        ${a.toolsUsed ? `<div class="attr-item mb-8"><div class="attr-label">Tools</div><div class="attr-value">${escHtml(a.toolsUsed)}</div></div>` : ''}
         <div class="attr-row">
-          <div class="attr-item">
-            <div class="attr-label">Blooming</div>
+          <div class="attr-item"><div class="attr-label">Blooming</div>
             <div class="attr-value"><span class="badge ${a.blooming ? 'badge-yes' : 'badge-no'}">${a.blooming ? 'Yes' : 'No'}</span></div>
           </div>
-          <div class="attr-item">
-            <div class="attr-label">Recent Fire</div>
+          <div class="attr-item"><div class="attr-label">Recent Fire</div>
             <div class="attr-value"><span class="badge ${a.recentFire ? 'badge-yes' : 'badge-no'}">${a.recentFire ? 'Yes' : 'No'}</span></div>
           </div>
         </div>
-
-        ${a.unusualCharacteristics ? `
-          <div class="attr-item mb-8">
-            <div class="attr-label">Unusual Characteristics</div>
-            <div class="attr-value">${escHtml(a.unusualCharacteristics)}</div>
-          </div>` : ''}
-
-        ${a.other ? `
-          <div class="attr-item mb-8">
-            <div class="attr-label">Other Notes</div>
-            <div class="attr-value">${escHtml(a.other)}</div>
-          </div>` : ''}
-
-        ${a.iNaturalistLink ? `
-          <div class="attr-item mb-8">
-            <div class="attr-label">iNaturalist</div>
-            <div class="attr-value" style="word-break:break-all;font-size:12px;color:var(--accent-green-light)">${escHtml(a.iNaturalistLink)}</div>
-          </div>` : ''}
-
+        ${a.unusualCharacteristics ? `<div class="attr-item mb-8"><div class="attr-label">Unusual</div><div class="attr-value">${escHtml(a.unusualCharacteristics)}</div></div>` : ''}
+        ${a.other ? `<div class="attr-item mb-8"><div class="attr-label">Other</div><div class="attr-value">${escHtml(a.other)}</div></div>` : ''}
+        ${a.iNaturalistLink ? `<div class="attr-item mb-8"><div class="attr-label">iNaturalist</div><div class="attr-value" style="font-size:11px;color:var(--accent-green-light);word-break:break-all">${escHtml(a.iNaturalistLink)}</div></div>` : ''}
         ${this._renderCustomFields(a.customFields)}
-
-        ${a.pictures && a.pictures.length ? `
+        ${a.pictures?.length ? `
           <div class="attr-label mb-8">Photos</div>
           <div class="photo-grid">
-            ${a.pictures.map((b64, i) => `<img class="photo-thumb" src="${b64}" alt="photo ${i+1}"
-              onclick="polygonMgr._viewPhoto('${p.id}', ${i})">`).join('')}
+            ${a.pictures.map((b64, i) => `<img class="photo-thumb" src="${b64}" onclick="polygonMgr._viewPhoto('${p.id}',${i})">`).join('')}
           </div>` : ''}
-
-        ${a.skipUntilYear ? `
-          <div style="margin-top:10px;padding:8px;background:#3a2010;border-radius:4px;font-size:11px;color:var(--accent-amber)">
-            ⚠ Skipped until ${a.skipUntilYear} season
-          </div>` : ''}
-
-        ${a.visitHistory && a.visitHistory.length ? `
-          <div class="attr-label mt-8">Visit History</div>
-          ${a.visitHistory.slice(-3).map(v => `
-            <div style="font-size:11px;color:var(--text-muted);padding:2px 0">${v.date} — ${v.wouldReturn ? 'Would return' : 'Skip season'}</div>`).join('')}
-          ` : ''}
+        ${a.skipUntilYear ? `<div style="margin-top:10px;padding:8px;background:#3a2010;border-radius:4px;font-size:11px;color:var(--accent-amber)">⚠ Skipped until ${a.skipUntilYear}</div>` : ''}
       </div>
 
       <div class="detail-actions">
-        <button class="btn btn-amber" onclick="polygonMgr._markVisited('${p.id}')">✓ Mark Visited</button>
+        <button class="btn btn-amber"     onclick="polygonMgr._markVisited('${p.id}')">✓ Mark Visited</button>
         <button class="btn btn-secondary" onclick="polygonMgr._editPolygon('${p.id}')">✏ Edit</button>
         <button class="btn btn-secondary" onclick="seedMap.panToPolygon('${p.id}')">⊕ Focus</button>
-        <button class="btn btn-danger" onclick="polygonMgr._confirmDelete('${p.id}')">🗑 Delete</button>
+        <button class="btn btn-danger"    onclick="polygonMgr._confirmDelete('${p.id}')">🗑 Delete</button>
       </div>`;
   }
 
   _renderMultiDetail(polygons) {
-    const panel = document.getElementById('detail-panel');
-    panel.innerHTML = `
+    document.getElementById('detail-panel').innerHTML = `
       <div class="detail-header">
         <div style="font-weight:bold">${polygons.length} Overlapping Areas</div>
         <button class="close-btn" onclick="polygonMgr.hideDetailPanel()">✕</button>
       </div>
       <div style="padding:8px 12px">
-        ${polygons.map(p => `
-          <div class="result-card" onclick="polygonMgr._renderSingleDetail(polygonMgr.polygons.find(x=>x.id==='${p.id}'))">
+        ${polygons.map(p => {
+          const species = this.getSpecies(p);
+          return `<div class="result-card" onclick="polygonMgr._renderSingleDetail(polygonMgr.polygons.find(x=>x.id==='${p.id}'))">
             <div class="result-card-name">${escHtml(p.name)}</div>
-            ${p.attributes.botanicalName ? `<div class="result-card-botanical">${escHtml(p.attributes.botanicalName)}</div>` : ''}
+            ${species.length ? `<div class="result-card-botanical">${species.map(s => escHtml(s)).join(', ')}</div>` : ''}
             <div class="result-card-meta">
               <span class="result-meta-item">Yield: ${p.attributes.seedYield ?? '—'}/10</span>
               <span class="result-meta-item">Abundance: ${p.attributes.relativeAbundance ?? '—'}/10</span>
             </div>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>`;
   }
 
   _ratingPips(val, style = '') {
     if (val == null || val === '') return '<span class="text-muted">—</span>';
-    const n = parseInt(val);
-    const pips = Array.from({length: 10}, (_, i) =>
-      `<div class="rating-pip ${i < n ? 'filled' + (style ? ' ' + style : '') : ''}"></div>`
-    ).join('');
+    const n    = parseInt(val);
+    const pips = Array.from({length:10}, (_,i) =>
+      `<div class="rating-pip ${i < n ? 'filled' + (style ? ' '+style : '') : ''}"></div>`).join('');
     return `<div class="rating-bar">${pips}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${n}/10</div>`;
   }
 
-  _seasonBadge(start, end, inSeason) {
+  _seasonBadge(start, end, inSzn) {
     if (!start && !end) return '<span class="text-muted">—</span>';
-    const label = `${start || '?'} – ${end || '?'}`;
-    const cls = inSeason === true ? 'season-in' : inSeason === false ? 'season-out' : 'season-unknown';
-    const icon = inSeason === true ? '✓' : inSeason === false ? '✕' : '?';
+    const label = `${start||'?'} – ${end||'?'}`;
+    const cls   = inSzn === true ? 'season-in' : inSzn === false ? 'season-out' : 'season-unknown';
+    const icon  = inSzn === true ? '✓' : inSzn === false ? '✕' : '?';
     return `<span class="season-indicator ${cls}">${icon} ${label}</span>`;
   }
 
   _renderCustomFields(customFields) {
     if (!customFields || !Object.keys(customFields).length) return '';
-    return Object.entries(customFields).map(([k, v]) => `
-      <div class="attr-item mb-8">
-        <div class="attr-label">${escHtml(k)}</div>
-        <div class="attr-value">${escHtml(v)}</div>
-      </div>`).join('');
+    return Object.entries(customFields).map(([k, v]) =>
+      `<div class="attr-item mb-8"><div class="attr-label">${escHtml(k)}</div><div class="attr-value">${escHtml(v)}</div></div>`
+    ).join('');
   }
 
   _isInSeason(startStr, endStr) {
     if (!startStr && !endStr) return null;
-    const now = new Date();
-    const year = now.getFullYear();
-    const try_parse = (s) => {
+    const now  = new Date();
+    const yr   = now.getFullYear();
+    const parse = s => {
       if (!s) return null;
-      // Try MM-DD or Month Day or MM/DD
-      const parts = s.match(/(\d{1,2})[\/\-](\d{1,2})/);
-      if (parts) return new Date(year, parseInt(parts[1]) - 1, parseInt(parts[2]));
-      // Try month name
+      const d1 = s.match(/(\d{1,2})[\/\-](\d{1,2})/);
+      if (d1) return new Date(yr, parseInt(d1[1])-1, parseInt(d1[2]));
       const months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-      const m = s.toLowerCase().match(/([a-z]+)\s*(\d+)/);
-      if (m && months[m[1].slice(0,3)] !== undefined) {
-        return new Date(year, months[m[1].slice(0,3)], parseInt(m[2]));
-      }
+      const d2 = s.toLowerCase().match(/([a-z]+)\s*(\d+)/);
+      if (d2 && months[d2[1].slice(0,3)] !== undefined)
+        return new Date(yr, months[d2[1].slice(0,3)], parseInt(d2[2]));
       return null;
     };
-    const start = try_parse(startStr);
-    const end = try_parse(endStr);
-    if (!start && !end) return null;
-    if (start && end) return now >= start && now <= end;
-    if (start) return now >= start;
-    if (end) return now <= end;
+    const s = parse(startStr), e = parse(endStr);
+    if (s && e) return now >= s && now <= e;
+    if (s) return now >= s;
+    if (e) return now <= e;
     return null;
   }
 
   _viewPhoto(polygonId, index) {
     const p = this.polygons.find(x => x.id === polygonId);
-    if (!p || !p.attributes.pictures[index]) return;
+    if (!p?.attributes?.pictures?.[index]) return;
     const win = window.open();
     win.document.write(`<img src="${p.attributes.pictures[index]}" style="max-width:100%;max-height:100vh">`);
+  }
+
+  async _editPolygon(id) {
+    const p = this.polygons.find(x => x.id === id);
+    if (!p) return;
+    this.hideDetailPanel();
+    this.openForm({ toGeoJSON: () => p.geojson }, id);
   }
 
   async _confirmDelete(id) {
@@ -440,18 +434,8 @@ class PolygonManager {
     if (!p) return;
     if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     await this.deletePolygon(id);
-    seedSync.deletePolygon(id);
     this.hideDetailPanel();
     seedRecords.render();
-  }
-
-  async _editPolygon(id) {
-    const p = this.polygons.find(x => x.id === id);
-    if (!p) return;
-    this.hideDetailPanel();
-    // Use the existing geojson, no new leaflet layer needed
-    const fakeLayer = { toGeoJSON: () => p.geojson };
-    this.openForm(fakeLayer, id);
   }
 
   async _markVisited(id) {
@@ -464,49 +448,40 @@ class PolygonManager {
 
   async resolveVisit(wouldReturn) {
     const id = this.visitPromptId;
-    const p = this.polygons.find(x => x.id === id);
+    const p  = this.polygons.find(x => x.id === id);
     if (!p) return;
-
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0,10);
     p.attributes.visitHistory = p.attributes.visitHistory || [];
     p.attributes.visitHistory.push({ date: today, wouldReturn });
-
-    if (!wouldReturn) {
-      p.attributes.skipUntilYear = new Date().getFullYear() + 1;
-    }
-
+    if (!wouldReturn) p.attributes.skipUntilYear = new Date().getFullYear() + 1;
     p.attributes.dateVisited = today;
     await seedDB.savePolygon(p);
-
     document.getElementById('modal-visit').classList.add('hidden');
     this.hideDetailPanel();
   }
 
-  // ===== LAYERS PANEL =====
+  // ── Layers panel ──────────────────────────────────────────
   _refreshLayersPanel() {
     const list = document.getElementById('layers-list');
     if (!list) return;
     list.innerHTML = '';
-
-    const layerNames = new Set(this.polygons.map(p => p.plantLayer).filter(Boolean));
-    if (!layerNames.size) {
-      list.innerHTML = '<div class="text-muted" style="padding:12px;font-size:12px">No plant layers yet. Draw an area and assign a layer name.</div>';
+    const names = new Set(this.polygons.map(p => p.plantLayer).filter(Boolean));
+    if (!names.size) {
+      list.innerHTML = '<div class="text-muted" style="padding:12px;font-size:12px">No layers yet.</div>';
       return;
     }
-
-    layerNames.forEach(name => {
+    names.forEach(name => {
       const color = this.getColorForLayer(name);
       const count = this.polygons.filter(p => p.plantLayer === name).length;
-      const div = document.createElement('div');
+      const div   = document.createElement('div');
       div.className = 'layer-item';
       div.innerHTML = `
         <div class="layer-color-dot" style="background:${color}"></div>
         <div class="layer-name">${escHtml(name)} <span class="text-muted">(${count})</span></div>
-        <div class="layer-toggle on" data-layer="${escHtml(name)}" title="Toggle visibility"></div>`;
-      div.querySelector('.layer-toggle').addEventListener('click', (e) => {
+        <div class="layer-toggle on" data-layer="${escHtml(name)}"></div>`;
+      div.querySelector('.layer-toggle').addEventListener('click', e => {
         const btn = e.currentTarget;
-        const isOn = btn.classList.toggle('on');
-        seedMap.setLayerVisible(name, isOn);
+        seedMap.setLayerVisible(name, btn.classList.toggle('on'));
       });
       list.appendChild(div);
     });
@@ -519,4 +494,4 @@ function escHtml(str) {
 }
 
 window.polygonMgr = new PolygonManager();
-window.escHtml = escHtml;
+window.escHtml    = escHtml;
